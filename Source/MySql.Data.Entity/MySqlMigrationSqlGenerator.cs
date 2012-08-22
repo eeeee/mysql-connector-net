@@ -22,13 +22,14 @@
 
 using System;
 using System.Collections.Generic;
+using System.Data.Entity.Core.Common;
+using System.Data.Entity.Core.Metadata.Edm;
 using System.Linq;
 using System.Text;
 using System.Data.Common;
 using System.Data.Entity.Migrations.Sql;
 using System.Data.Entity.Migrations.Model;
 using MySql.Data.MySqlClient;
-using System.Data.Metadata.Edm;
 
 namespace MySql.Data.Entity
 {
@@ -54,13 +55,13 @@ namespace MySql.Data.Entity
       dispatcher.Add("AlterColumnOperation", (OpDispatcher)((op) => { return Generate(op as AlterColumnOperation); }));
       dispatcher.Add("CreateIndexOperation", (OpDispatcher)((op) => { return Generate(op as CreateIndexOperation); }));
       dispatcher.Add("CreateTableOperation", (OpDispatcher)((op) => { return Generate(op as CreateTableOperation); }));
-      dispatcher.Add("DeleteHistoryOperation", (OpDispatcher)((op) => { return Generate(op as DeleteHistoryOperation); }));
+      //dispatcher.Add("DeleteHistoryOperation", (OpDispatcher)((op) => { return Generate(op as DeleteHistoryOperation); }));
       dispatcher.Add("DropColumnOperation", (OpDispatcher)((op) => { return Generate(op as DropColumnOperation); }));
       dispatcher.Add("DropForeignKeyOperation", (OpDispatcher)((op) => { return Generate(op as DropForeignKeyOperation); }));
       dispatcher.Add("DropIndexOperation", (OpDispatcher)((op) => { return Generate(op as DropIndexOperation); }));
       dispatcher.Add("DropPrimaryKeyOperation", (OpDispatcher)((op) => { return Generate(op as DropPrimaryKeyOperation); }));
       dispatcher.Add("DropTableOperation", (OpDispatcher)((op) => { return Generate(op as DropTableOperation); }));
-      dispatcher.Add("InsertHistoryOperation", (OpDispatcher)((op) => { return Generate(op as InsertHistoryOperation); }));
+      //dispatcher.Add("InsertHistoryOperation", (OpDispatcher)((op) => { return Generate(op as InsertHistoryOperation); }));
       dispatcher.Add("MoveTableOperation", (OpDispatcher)((op) => { return Generate(op as MoveTableOperation); }));
       dispatcher.Add("RenameColumnOperation", (OpDispatcher)((op) => { return Generate(op as RenameColumnOperation); }));
       dispatcher.Add("RenameTableOperation", (OpDispatcher)((op) => { return Generate(op as RenameTableOperation); }));
@@ -279,10 +280,10 @@ namespace MySql.Data.Entity
       return new MigrationStatement() { Sql = "drop table " + "`" + op.Name + "`" };
     }
 
-    protected virtual MigrationStatement Generate(DeleteHistoryOperation op)
+/*    protected virtual MigrationStatement Generate(DeleteHistoryOperation op)
     {
       return new MigrationStatement { Sql = string.Format("delete from `{0}` where MigrationId = '{1}'", op.Table, op.MigrationId) };
-    }
+    }*/
 
     protected virtual MigrationStatement Generate(AddPrimaryKeyOperation op)
     {
@@ -321,7 +322,7 @@ namespace MySql.Data.Entity
     }
 
 
-    protected virtual MigrationStatement Generate(InsertHistoryOperation op)
+/*    protected virtual MigrationStatement Generate(InsertHistoryOperation op)
     {
       if (op == null) return null;
 
@@ -339,7 +340,7 @@ namespace MySql.Data.Entity
                       op.ProductVersion);
 
       return new MigrationStatement { Sql = sb.ToString() };
-    }
+    }*/
 
     protected virtual MigrationStatement Generate(RenameTableOperation op)
     {

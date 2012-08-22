@@ -21,10 +21,10 @@
 // 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 
 using System;
+using System.Data.Entity.Core.Common.CommandTrees;
+using System.Data.Entity.Core.Metadata.Edm;
 using System.Text;
 using System.Diagnostics;
-using System.Data.Common.CommandTrees;
-using System.Data.Metadata.Edm;
 using System.Collections.Generic;
 using MySql.Data.MySqlClient;
 using System.Data;

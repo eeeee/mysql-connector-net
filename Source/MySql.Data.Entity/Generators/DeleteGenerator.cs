@@ -20,9 +20,8 @@
 // with this program; if not, write to the Free Software Foundation, Inc., 
 // 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 
+using System.Data.Entity.Core.Common.CommandTrees;
 using System.Text;
-using System.Data.Common.CommandTrees;
-using System.Data.Metadata.Edm;
 using MySql.Data.MySqlClient;
 
 namespace MySql.Data.Entity

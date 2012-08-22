@@ -23,10 +23,11 @@
 
 using System;
 using System.Data.Common;
-using System.Data.Common.CommandTrees;
 using System.Collections.Generic;
-using System.Data.Metadata.Edm;
+using System.Data.Entity.Core.Common;
 using System.Data;
+using System.Data.Entity.Core.Common.CommandTrees;
+using System.Data.Entity.Core.Metadata.Edm;
 using MySql.Data.Entity;
 using System.Reflection;
 using System.Diagnostics;

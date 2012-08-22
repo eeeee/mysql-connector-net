@@ -22,8 +22,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Data.Entity.Core.Metadata.Edm;
 using System.Text;
-using System.Data.Metadata.Edm;
 using System.Diagnostics;
 
 namespace MySql.Data.Entity

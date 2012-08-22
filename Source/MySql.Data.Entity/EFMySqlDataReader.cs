@@ -22,10 +22,10 @@
 
 using System;
 using System.Data.Common;
+using System.Data.Entity.Core.Metadata.Edm;
 using MySql.Data.MySqlClient;
 using System.Collections;
 using System.Data;
-using System.Data.Metadata.Edm;
 using System.Globalization;
 using System.Text;
 

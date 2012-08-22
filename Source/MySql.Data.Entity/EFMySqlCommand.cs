@@ -22,7 +22,7 @@
 
 using System;
 using System.Data.Common;
-using System.Data.Metadata.Edm;
+using System.Data.Entity.Core.Metadata.Edm;
 using System.Data;
 using MySql.Data.MySqlClient;
 
