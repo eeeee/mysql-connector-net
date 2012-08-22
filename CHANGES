@@ -1,0 +1,22 @@
+6.6.0
+- Fix for ArgumentNull exception when using Take().Count() in a LINQ to Entities query (bug MySql #64749, Oracle bug #13913047).
+- Fix for type varchar changed to bit when saving in Table Designer (Oracle bug #13916560).
+- Fix for error when trying to change the name of an Index on the Indexes/Keys editor; along with this fix now users can change the Index type of a new Index which could not be done
+  in previous versions, and when changing the Index name the change is reflected on the list view at the left side of the Index/Keys editor (Oracle bug #13613801).
+- Fix for stored procedure call using only its name with EF code first (MySql bug #64999, Oracle bug #14008699). 
+- Fix for List.Contains generates a bunch of ORs instead of more efficient IN clause in 
+  LINQ to Entities (Oracle bug #14016344, MySql bug #64934).
+- Fix for performance issue in generated EF query: .NET StartsWith/Contains/EndsWith produces MySql's locate instead of Like (MySql bug #64935, Oracle bug #14009363).
+- Fix for script generated for code first contains wrong alter table and wrong declaration for byte[] (MySql bug #64216, Oracle bug #13900091).
+- Fix for bug MySqlDateTime when using milliseconds precision minor than 6 in the column definition. (MySql #64867 Oracle bug #13881444 ).
+- Fix and code contribution for bug Timed out sessions are removed without notification which allow to enable the Expired CallBack when Session Provider times out any session (bug MySql #62266 Oracle bug # 13354935)
+- Entity Framework Code First Enable-Migrations new feature in version 4.3.1. First commit that includes:
+	- New Class MySqlMigrationSqlGenerator that generates mysql statements for Migration Operations. Still has some improvements to be done. (Check TODO Notes included).
+	- New Class MySqlConnectionFactory.cs used in configuration for Enable Migrations
+	- Changes in ProviderManifest.cs: Added validation in public override TypeUsage GetEdmType(TypeUsage storeType) to use a different constructor for CreateTypeUsage when Primitive type    is String.
+	- Changes in ProviderServices.cs: Changed visibility in method GetColumnType(TypeUsage type) from private to internal.
+	- Added reference in MySql.Data.Entity.csproj to include new namespace for Migrations.
+- Initial version of Debugger of MySql stored routines & its Visual Studio integration (worklogs #6270 and #6245).
+- Fix for Exception thrown when using cascade delete in an EDM Model-First in Entity Framework (Oracle bug #14008752, MySql bug #64779).
+- Fix for Session locking issue with MySqlSessionStateStore (MySql bug #63997, Oracble bug #13733054).
+- Fixed deleting a user profile using Profile provider (MySQL bug #64409, Oracle bug #13790123)
