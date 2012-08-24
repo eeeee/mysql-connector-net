@@ -66,6 +66,8 @@ namespace MySql.Data.Entity
       dispatcher.Add("RenameColumnOperation", (OpDispatcher)((op) => { return Generate(op as RenameColumnOperation); }));
       dispatcher.Add("RenameTableOperation", (OpDispatcher)((op) => { return Generate(op as RenameTableOperation); }));
       dispatcher.Add("SqlOperation", (OpDispatcher)((op) => { return Generate(op as SqlOperation); }));
+
+      dispatcher.Add("HistoryOperation", (OpDispatcher)((op) => { return Generate(op as HistoryOperation); }));
     }
 
     public override IEnumerable<MigrationStatement> Generate(IEnumerable<MigrationOperation> migrationOperations, string providerManifestToken)
@@ -351,10 +353,46 @@ namespace MySql.Data.Entity
       return new MigrationStatement { Sql = sb.ToString() };
     }
 
+    protected virtual MigrationStatement Generate(HistoryOperation op)
+    {
+        if (op == null) return null;
+
+        StringBuilder sb = new StringBuilder();
+        StringBuilder model = new StringBuilder();
+
+        if (op.Commands.Count()>1)
+            throw new NotImplementedException();
+        var opCommand = op.Commands.First();
+
+        var opMigrationId = (string)opCommand.Parameters.ElementAt(0).Value;
+        var opTable = opCommand.CommandText.Split('`')[1];
+
+        switch (char.ToLower(opCommand.CommandText[0]))
+        {
+            case 'i':
+                var opModel = (byte[])opCommand.Parameters.ElementAt(1).Value;
+                var opProductVersion = (string)opCommand.Parameters.ElementAt(2).Value;
+                foreach (byte item in opModel)
+                    model.Append(item.ToString("X2"));
+
+                sb.Append("insert into `" + opTable + "` (`migrationId`, `model`, `productVersion`) ");
+                sb.AppendFormat(" values ( '{0}', {1}, '{2}') ",
+                                opMigrationId,
+                                "0x" + model.ToString(),
+                                opProductVersion);
+                break;
+            case 'd':
+                return new MigrationStatement { Sql = string.Format("delete from `{0}` where MigrationId = '{1}'", opTable, opMigrationId) };
+           default:
+               throw new NotImplementedException();
+        }
+        return new MigrationStatement { Sql = sb.ToString() };
+    }
 
     protected virtual MigrationStatement Generate(MoveTableOperation op)
     {
-      return null; // TODO :check if we'll suppport this operation
+        throw new NotImplementedException();
+        return null; // TODO :check if we'll suppport this operation
     }
 
     protected virtual MigrationStatement Generate(SqlOperation op)
