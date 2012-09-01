@@ -153,7 +153,9 @@ namespace MySql.Data.Entity
 
       if (op.CascadeDelete)
       {
-        sb.Append("on update cascade on delete restrict");
+        // Todo: wtf?!
+        // sb.Append("on update cascade on delete restrict");
+        sb.Append("on update cascade on delete cascade");
       }
 
       return new MigrationStatement { Sql = sb.ToString() };
