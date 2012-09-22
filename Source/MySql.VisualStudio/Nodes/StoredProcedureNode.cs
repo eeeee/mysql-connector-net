@@ -332,7 +332,7 @@ namespace MySql.Data.VisualStudio
       info.dlo = Microsoft.VisualStudio.Shell.Interop.DEBUG_LAUNCH_OPERATION.DLO_CreateProcess;
       info.bstrExe = Moniker;
       info.bstrCurDir = @"C:\";
-      string connectionString = HierarchyAccessor.Connection.ConnectionSupport.ConnectionString + ";Allow User Variables=true;";
+      string connectionString = HierarchyAccessor.Connection.ConnectionSupport.ConnectionString + ";Allow User Variables=true;Allow Zero DateTime=true;";
       if (connectionString.IndexOf("password", StringComparison.OrdinalIgnoreCase) == -1)
       {
         MySql.Data.MySqlClient.MySqlConnection connection = ((MySql.Data.MySqlClient.MySqlConnection)HierarchyAccessor.Connection.GetLockedProviderObject());
@@ -351,10 +351,12 @@ namespace MySql.Data.VisualStudio
       try
       {
         int result = dbg.LaunchDebugTargets(1, pInfo);
+        if (result != 0)
+          throw new ApplicationException("COM error " + result);
       }
       catch (Exception ex)
       {
-        throw;
+        MessageBox.Show(ex.GetBaseException().Message, "Debugger Error");
       }
       finally
       {
