@@ -138,7 +138,13 @@ namespace MySql.Debugger
             ( string.IsNullOrEmpty( ri.Schema )? _utilCon.Database : ri.Schema ), ri.Name );
           ExecuteScalar(string.Format("drop {0} {1}", ri.Type, rName));
           Debug.WriteLine(string.Format("Debugger: Restoring {0}", rName));
+          string db = _utilCon.Database;
+          if( !string.IsNullOrEmpty( ri.Schema ) )
+          {
+            ExecuteRaw(string.Format( "use `{0}`", ri.Schema ));
+          }
           ExecuteRaw( string.Format( "delimiter //\n{0};\n //", ri.SourceCode ));
+          ExecuteRaw(string.Format("use `{0}`", db));
         }
       }
       finally
@@ -298,10 +304,11 @@ namespace MySql.Debugger
               LoadScopeVars(_scopeLevel);
             }
             int lineNumber = GetCurrentLineNumber();
-            CheckBreakpoints(lineNumber);
-            if (_completed) break;
+            int colNumber = GetCurrentColNumber();
             // Locate next statement to debug & preinstrument current statement dependencies
-            CommonTree nextCt = GetStatementFromLine(lineNumber);
+            CommonTree nextCt = GetStatementFromPosition(lineNumber, colNumber);
+            CheckBreakpoints(lineNumber, colNumber, nextCt);
+            if (_completed) break;
             // Preinstrument it
             if (nextCt != null)
             {
@@ -327,8 +334,9 @@ namespace MySql.Debugger
           try { this.Stop(); }
           catch { }
         }
-        _utilCon.Close();
-        _lockingCon.Close();
+        try { _utilCon.Close(); } catch { }
+        try { _lockingCon.Close(); } catch { }
+        try { _connection.Close(); } catch { }
         IsRunning = false;
         if (RestoreAtExit)
         {
@@ -551,44 +559,10 @@ namespace MySql.Debugger
       cmd.ExecuteNonQuery();
     }
 
-    /// <summary>
-    /// Get statement tree from line number.
-    /// </summary>
-    /// <param name="lineNumber"></param>
-    /// <returns></returns>
-    private CommonTree GetStatementFromLine(int lineNumber)
+    private CommonTree GetStatementFromPosition(int lineNumber, int colNumber)
     {
-      int tokenStartIndex = -1;
-      foreach (IToken t in CurrentScope.OwningRoutine.TokenStream.GetTokens())
-      {
-        if (t.Line == lineNumber)
-        {
-          tokenStartIndex = t.TokenIndex;
-          break;
-        }
-      }
-      return GetStmtForToken(CurrentScope.OwningRoutine.ParsedTree, tokenStartIndex);
-    }
-
-    private CommonTree GetStmtForToken( CommonTree t, int TokenStartIndex)
-    {
-      CommonTree result = null;
-      foreach (ITree ct in t.Children)
-      {
-        if (ct.TokenStartIndex == TokenStartIndex)
-        {
-          return (CommonTree)ct;
-        }
-        else
-        {
-          if (ct.ChildCount != 0)
-          {
-            result = GetStmtForToken((CommonTree)ct, TokenStartIndex);
-            if (result != null) return result;
-          }
-        }
-      }
-      return result;
+      RoutineInfo ri = CurrentScope.OwningRoutine;
+      return ri.GetStatementFromPos(lineNumber, colNumber);
     }
 
     /// <summary>
@@ -603,7 +577,7 @@ namespace MySql.Debugger
       StringBuilder sb = new StringBuilder();
       string spName = ri.Name;
       // build call
-      StringBuilder sbCall = new StringBuilder(string.Format("call {0}( ", spName));
+      StringBuilder sbCall = new StringBuilder(string.Format("call `{0}`( ", spName));
       if (ArgsValues != null)
       {
         foreach (string val in ArgsValues)
@@ -691,6 +665,11 @@ namespace MySql.Debugger
       return Convert.ToInt32(CurrentScope.Variables["@@@lineno"].Value);
     }
 
+    private int GetCurrentColNumber()
+    {
+      return Convert.ToInt32(CurrentScope.Variables["@@@colno"].Value);
+    }
+
     // Scope of variables
     internal Stack<RoutineScope> _scope = new Stack<RoutineScope>();
     
@@ -705,8 +684,8 @@ namespace MySql.Debugger
 
     private Dictionary<string, StoreType> LoadScopeVars(int DebugScopeLevel)
     {
-      string sql = 
-        @"select cast( VarValue as {3} ) from serversidedebugger.DebugScope where DebugSessionId = {0} and DebugScopeLevel = {1} and VarName = '{2}'";
+      string sql =
+        @"select cast( `serversidedebugger`.`DebugScope`.`VarValue` as {3} ) from `serversidedebugger`.`DebugScope` where `serversidedebugger`.`DebugScope`.`DebugSessionId` = {0} and `serversidedebugger`.`DebugScope`.`DebugScopeLevel` = {1} and `serversidedebugger`.`DebugScope`.`VarName` = '{2}' and `serversidedebugger`.`DebugScope`.`Id` = ( select max( `serversidedebugger`.`DebugScope`.`Id` ) from `serversidedebugger`.`DebugScope` where `serversidedebugger`.`DebugScope`.`DebugSessionId` = {0} and `serversidedebugger`.`DebugScope`.`DebugScopeLevel` = {1} and `serversidedebugger`.`DebugScope`.`VarName` = '{2}' )";
       Dictionary<string, StoreType> vars = CurrentScope.Variables;
       MySqlCommand cmd = new MySqlCommand(sql, _utilCon);
       foreach (StoreType st in vars.Values)
@@ -719,7 +698,8 @@ namespace MySql.Debugger
           if (r.IsDBNull(0))
             st.Value = DBNull.Value;
           else
-            st.Value = r.GetString(0);
+            // using this instead of r.GetString( 0 ) to cover the case when date is zeroed.
+            st.Value = r.GetValue(0).ToString();
         }
         finally
         {
@@ -740,9 +720,9 @@ namespace MySql.Debugger
         if (st.VarKind == VarKindEnum.Internal) continue;
         if (st.ValueChanged)
         {
-          sql.Append("replace `serversidedebugger`.`DebugScope`( DebugSessionId, DebugScopeLevel, VarName, VarValue ) ").
-            AppendFormat("values ( {0}, {1}, '{2}', cast( {3} as binary ) );", DebugSessionId, _scopeLevel, st.Name, st.WrapValue()).AppendLine();
-          //sql.AppendFormat(" call `serversidedebugger`.`UpdateScope`( {0}, {1}, '{2}', cast( {3} as binary ) );", DebugSessionId, _scopeLevel, st.Name, st.WrapValue()).AppendLine();
+          //sql.Append("replace `serversidedebugger`.`DebugScope`( DebugSessionId, DebugScopeLevel, VarName, VarValue ) ").
+          //  AppendFormat("values ( {0}, {1}, '{2}', cast( {3} as binary ) );", DebugSessionId, _scopeLevel, st.Name, st.WrapValue()).AppendLine();
+          sql.AppendFormat(" call `serversidedebugger`.`SetDebugScopeVar`( {0}, {1}, '{2}', cast( {3} as binary ) );", DebugSessionId, _scopeLevel, st.Name, st.WrapValue()).AppendLine();
           st.ValueChanged = false;
         }
       }
@@ -780,7 +760,13 @@ namespace MySql.Debugger
     {
       if (OnBreakpoint != null)
         OnBreakpoint(bp);
-    }    
+    }
+
+    internal void HitBreakpoint(Breakpoint bp)
+    {
+      if (bp.IsTriggered())
+        RaiseBreakpoint(bp);
+    }
 
     public static int GetTagHashCode(string tag)
     {
@@ -815,11 +801,37 @@ namespace MySql.Debugger
 
     private int stepOverScope = -1;
 
-    internal void CheckBreakpoints(int line)
+    internal void CheckBreakpoints(int line, int colNumber, CommonTree ct)
     {
+      int startColumn = 0;
+      int endColumn = UInt16.MaxValue;
+      int startLine = 0;
+      int endLine = 0;
       RoutineInfo ri = CurrentScope.OwningRoutine;
+      if ( (ct != null) && 
+        ( Cmp( ct.Text, "if" ) != 0 ) && ( Cmp( ct.Text, "while" ) != 0 ) &&
+        ( Cmp( ct.Text, "repeat" ) != 0 ) && ( Cmp( ct.Text, "loop" ) != 0 ) &&
+        ( Cmp( ct.Text, "case_stmt" ) != 0 ) && ( Cmp( ct.Text, "declare_handler" ) != 0 ))
+      {
+        IToken tkStart = ri.TokenStream.Get(ct.TokenStartIndex);
+        IToken tkEnd = ri.TokenStream.Get(ct.TokenStopIndex + 1);
+        if (tkEnd == null)
+          tkEnd = ri.TokenStream.Get(ct.TokenStopIndex);
+        startColumn = tkStart.CharPositionInLine;
+        endColumn = tkEnd.CharPositionInLine + 1;
+        startLine = tkStart.Line;
+        endLine = tkEnd.Line;
+      }
+      else
+      {
+        startLine = endLine = line;
+        startColumn = colNumber;
+      }
       int hash = GetTagHashCode(ri.SourceCode);
       string routineName = ri.GetFullName(_utilCon.Database);
+      Breakpoint fakeBreakpoint = new Breakpoint( this ) { StartLine = startLine, EndLine = endLine, IsFake = true, Hash = hash, 
+        RoutineName = routineName, StartColumn = startColumn, EndColumn = endColumn };
+      CurrentScope.CurrentPosition = fakeBreakpoint;
       // Breakpoints on the same line but different files are treated by making a breakpoint uniquely identified
       // by line number and hash of current routine source code.
       if (OnBreakpoint == null) return;
@@ -840,12 +852,12 @@ namespace MySql.Debugger
         else
           fireBp = true;
         if (fireBp)
-          RaiseBreakpoint(new Breakpoint() { Line = line, IsFake = true, Hash = hash, RoutineName = routineName });
+          RaiseBreakpoint(fakeBreakpoint);
         return;
       }
       else if (SteppingType == SteppingTypeEnum.StepInto)
       {
-        RaiseBreakpoint(new Breakpoint() { Line = line, IsFake = true, Hash = hash, RoutineName = routineName });
+        RaiseBreakpoint(fakeBreakpoint);
         return;
       }
       else if (SteppingType == SteppingTypeEnum.StepOut)
@@ -858,7 +870,7 @@ namespace MySql.Debugger
         if (_scopeLevel == nextStepOut)
         {
           nextStepOut = -1;
-          RaiseBreakpoint(new Breakpoint() { Line = line, IsFake = true, Hash = hash, RoutineName = routineName });
+          RaiseBreakpoint(fakeBreakpoint);
           return;
         }
       }
@@ -867,7 +879,7 @@ namespace MySql.Debugger
       if (_breakpoints.TryGetValue(bpKey, out bp) && !bp.Disabled)
       {
         stepOverScope = __scopeLevel;
-        RaiseBreakpoint(bp);
+        HitBreakpoint(bp);
       }
     }
 
@@ -884,7 +896,7 @@ namespace MySql.Debugger
       }
       else
       {
-        bp = new Breakpoint() { Hash = bpKey.Hash, Line = line };
+        bp = new Breakpoint( this ) { Hash = bpKey.Hash, StartLine = line };
         _breakpoints.Add( bpKey, bp );
         return bp;
       }
@@ -1091,29 +1103,25 @@ namespace MySql.Debugger
       preInscode.AppendFormat("set {0} = last_insert_id();", VAR_DBG_LAST_INSERT_ID);
       preInscode.AppendLine();
       preInscode.AppendFormat("set {0} = found_rows();", VAR_DBG_FOUND_ROWS);
-      preInscode.AppendLine();      
-      preInscode.Append("replace `serversidedebugger`.`DebugScope`( DebugSessionId, DebugScopeLevel, VarName, VarValue ) values ").
-        AppendLine("( {3}, {0}, '@@@lineno', {1} ); ");
-      //preInscode.AppendLine("call `serversidedebugger`.`UpdateScope`( {3}, {0}, '@@@lineno', {1} );");
+      preInscode.AppendLine();
+      preInscode.Append(" call `serversidedebugger`.`SetDebugScopeVar`( {3}, {0}, '@@@lineno', {1} );" ).AppendLine();      
+      preInscode.Append(" call `serversidedebugger`.`SetDebugScopeVar`( {3}, {0}, '@@@colno', {4} );").AppendLine();      
       // ...and user variables
       foreach (StoreType st in args.Values)
       {
-        if (st.VarKind == VarKindEnum.Internal) continue;
-        preInscode.Append("replace `serversidedebugger`.`DebugScope`( DebugSessionId, DebugScopeLevel, VarName, VarValue ) ").
-          Append("values ( {3}, {0}, ").
+        if (st.VarKind == VarKindEnum.Internal) continue;        
+        preInscode.AppendLine("call `serversidedebugger`.`SetDebugScopeVar`( {3}, {0}, ").
           AppendFormat("'{0}', cast( {0} as binary ) );", st.Name).AppendLine();
-        //preInscode.AppendLine("call `serversidedebugger`.`UpdateScope`( {3}, {0}, ").
-        //  AppendFormat("'{0}', cast( {0} as binary ) );", st.Name).AppendLine();
       }
       StringBuilder postInscode = new StringBuilder();
       foreach (StoreType st in args.Values)
       {
         if (st.VarKind == VarKindEnum.Internal) continue;
         postInscode.AppendFormat(
-          //"set {0} = ( select if( `serversidedebugger`.`debugscope`.`IsValueNull` = 1, NULL, cast( `serversidedebugger`.`debugscope`.`VarValue` as {1} ) ) from `serversidedebugger`.`debugscope` where ( `serversidedebugger`.`debugscope`.`DebugSessionId` = {2} ) ",
-          "set {0} = ( select cast( `serversidedebugger`.`debugscope`.`VarValue` as {1} ) from `serversidedebugger`.`debugscope` where ( `serversidedebugger`.`debugscope`.`DebugSessionId` = {2} ) ",
-          st.Name, st.GetCastExpressionFromBinary(), "{1}").
-          Append(" and ( `serversidedebugger`.`debugscope`.`DebugScopeLevel` = {0} ) ").AppendFormat(" and ( `serversidedebugger`.`debugscope`.`VarName` = '{0}' ) limit 1 );", st.Name).AppendLine();
+          @"set {0} = ( select cast( `serversidedebugger`.`DebugScope`.`VarValue` as {1} ) from `serversidedebugger`.`DebugScope` where `serversidedebugger`.`DebugScope`.`DebugSessionId` = {2} ", st.Name, st.GetCastExpressionFromBinary(), DebugSessionId).
+          AppendFormat(" and `serversidedebugger`.`DebugScope`.`DebugScopeLevel` = {0} and `serversidedebugger`.`DebugScope`.`VarName` = '{1}' and `serversidedebugger`.`DebugScope`.`Id` = ( select max( `serversidedebugger`.`DebugScope`.`Id` ) from `serversidedebugger`.`DebugScope` where `serversidedebugger`.`DebugScope`.`DebugSessionId` = {2} and `serversidedebugger`.`DebugScope`.`DebugScopeLevel` = {0} and `serversidedebugger`.`DebugScope`.`VarName` = '{1}' ));",
+            "{0}", st.Name, DebugSessionId );
+        postInscode.AppendLine();
       }
       routine.PreInstrumentationCode = preInscode.ToString();
       routine.PostInstrumentationCode = postInscode.ToString();
@@ -1124,22 +1132,32 @@ namespace MySql.Debugger
       GenerateInstrumentedCode(routine, sql);
       routine.InstrumentedSourceCode = sql.ToString();
       string sqlDrop = string.Format("drop {0} {1}", routine.Type.ToString(), routine.Name);
+      string db = _utilCon.Database;
+      if (!string.IsNullOrEmpty(routine.Schema))
+      {
+        ExecuteRaw(string.Format("use `{0}`", routine.Schema ));
+      }
       ExecuteRaw(sqlDrop);
       try
       {
         ExecuteRaw(string.Format("delimiter //\n{0}\n//", routine.InstrumentedSourceCode));
       }
-      catch( Exception )
+      catch (Exception)
       {
         // In case of exception restore previous non-instrumented version.
-        ExecuteRaw( string.Format("delimiter //\n{0}\n//", routine.SourceCode ) );
+        ExecuteRaw(string.Format("delimiter //\n{0}\n//", routine.SourceCode));
         throw;
+      }
+      finally
+      {
+        ExecuteRaw(string.Format("use `{0}`", db));
       }
     }
 
     private void RegisterInternalVars(Dictionary<string, StoreType> vars)
     {
       vars.Add("@@@lineno", new StoreType() { Name = "@@@lineno", VarKind = VarKindEnum.Internal, Value = 1, Type = "int" });
+      vars.Add("@@@colno", new StoreType() { Name = "@@@colno", VarKind = VarKindEnum.Internal, Value = 1, Type = "int" });
     }
 
     /// <summary>
@@ -1210,7 +1228,8 @@ namespace MySql.Debugger
       // Generate scope exit:
       if (routine.Type != RoutineInfoType.Function)
       {
-        EmitInstrumentationCode(sql, routine, routine.TokenStream.Get(beginEnd.TokenStopIndex).Line);
+        IToken tk = routine.TokenStream.Get(beginEnd.TokenStopIndex);
+        EmitInstrumentationCode(sql, routine, tk.Line, tk.CharPositionInLine);
       }
       sql.AppendLine("#end scope");
       if (routine.Type != RoutineInfoType.Function)
@@ -1221,11 +1240,11 @@ namespace MySql.Debugger
       sql.AppendLine("end;");
     }
 
-    private void EmitInstrumentationCode(StringBuilder sql, RoutineInfo routine, int lineno)
+    private void EmitInstrumentationCode(StringBuilder sql, RoutineInfo routine, int lineno, int colno)
     {
       sql.AppendFormat("if {0} = 0 then ", VAR_DBG_NO_DEBUGGING);
       sql.AppendLine();
-      sql.AppendFormat(routine.PreInstrumentationCode, VAR_DBG_SCOPE_LEVEL, lineno, routine.FullName, DebugSessionId);
+      sql.AppendFormat(routine.PreInstrumentationCode, VAR_DBG_SCOPE_LEVEL, lineno, routine.FullName, DebugSessionId, colno);
       sql.AppendLine(string.Format("call `serversidedebugger`.`ExitEnterCriticalSection`( '{0}', {1} );", routine.Name, lineno ));
       sql.AppendFormat(routine.PostInstrumentationCode, VAR_DBG_SCOPE_LEVEL, DebugSessionId);
       sql.AppendLine(" end if;");
@@ -1236,7 +1255,7 @@ namespace MySql.Debugger
       ExecuteRaw(string.Format("delete from `serversidedebugger`.`DebugScope` where DebugSessionId = {0}", DebugSessionId));
       ExecuteRaw(string.Format("delete from `serversidedebugger`.`DebugCallStack` where DebugSessionId = {0}", DebugSessionId));
     }
-
+    
     /// <summary>
     /// Concats a set of tokens from start to finish token indexes. Also Wraps an expression of the 
     /// form "a" to "( `ExitEnterCriticalSectionFunction`() XX ( a ) )".
@@ -1302,13 +1321,10 @@ namespace MySql.Debugger
         }
         sb.Append(tok.Text);
       }
-      //foreach (IToken tok in cts.GetTokens( StartTokenIndex, EndTokenIndex ))
-      //{
-      //  sb.Append(tok.Text);
-      //}
     }
 
     // Session variables
+    private const string VAR_DBG_BINARY_BUF = "@dbg_binary_buf";
     private const string VAR_DBG_ROW_COUNT = "@dbg_row_count";
     private const string VAR_DBG_LAST_INSERT_ID = "@dbg_last_insert_id";
     private const string VAR_DBG_FOUND_ROWS = "@dbg_found_rows";
@@ -1320,10 +1336,6 @@ namespace MySql.Debugger
     {
       sql.AppendFormat("if {0} = 0 then ", VAR_DBG_NO_DEBUGGING);
       sql.AppendLine();
-      //sql.AppendFormat("set {0} = {0} + 1;", VAR_DBG_SCOPE_LEVEL );
-      //sql.AppendLine();
-      //sql.AppendFormat("update `serversidedebugger`.`DebugData` set `serversidedebugger`.`DebugData`.`Val` = {0} where `serversidedebugger`.`DebugData`.`Id` = 1;", VAR_DBG_SCOPE_LEVEL);
-      //sql.AppendLine();
       sql.Append("update `serversidedebugger`.`DebugData` set `serversidedebugger`.`DebugData`.`Val` = `serversidedebugger`.`DebugData`.`Val` + 1 where `serversidedebugger`.`DebugData`.`Id` = 1;");
       sql.AppendLine();
       sql.AppendFormat("call `serversidedebugger`.`Push`( {0}, '{1}' );", DebugSessionId, ri.FullName );
@@ -1336,12 +1348,6 @@ namespace MySql.Debugger
     {
       sql.AppendFormat("if {0} = 0 then ", VAR_DBG_NO_DEBUGGING);
       sql.AppendLine();
-      //sql.AppendFormat("set {0} = {0} - 1;", VAR_DBG_SCOPE_LEVEL);
-      //sql.AppendLine();
-      //sql.AppendFormat("update `serversidedebugger`.`DebugData` set `serversidedebugger`.`DebugData`.`Val` = {0} where `serversidedebugger`.`DebugData`.`Id` = 1;", VAR_DBG_SCOPE_LEVEL);
-      //sql.AppendLine();
-      //sql.Append("update `serversidedebugger`.`DebugData` set `serversidedebugger`.`DebugData`.`Val` = `serversidedebugger`.`DebugData`.`Val` - 1 where `serversidedebugger`.`DebugData`.`Id` = 1;" );
-      //sql.AppendLine();
       sql.Append("call `serversidedebugger`.`CleanupScope`( 1 );");
       sql.AppendLine();
       sql.AppendFormat("call `serversidedebugger`.`Pop`( {0} );", DebugSessionId );
@@ -1371,6 +1377,8 @@ namespace MySql.Debugger
       RoutineInfo routine,
       StringBuilder sql)
     {
+      IToken tkTmp;
+      ITree trTmp;
       CommonTokenStream tokenStream = routine.TokenStream;
       string PreInstrumentationCode = routine.PreInstrumentationCode;
       string PostInstrumentationCode = routine.PostInstrumentationCode;
@@ -1400,7 +1408,8 @@ namespace MySql.Debugger
               }
               sql.AppendLine("begin");
               GenerateInstrumentedCodeRecursive(tc.Children, routine, sql);
-              EmitInstrumentationCode(sql, routine, tokenStream.GetTokens(tc.TokenStopIndex, tc.TokenStopIndex).Last().Line);
+              tkTmp = tokenStream.GetTokens(tc.TokenStopIndex, tc.TokenStopIndex).Last();
+              EmitInstrumentationCode(sql, routine, tkTmp.Line, tkTmp.CharPositionInLine);
               // TODO: Add END token to AST, so you can put breakpoints in the END
               //routine.RegisterStatement(tc);
               sql.AppendLine("end;");
@@ -1410,7 +1419,7 @@ namespace MySql.Debugger
             {
               int i = 0;
               int idxThen = -1;
-              EmitInstrumentationCode(sql, routine, tc.Line);
+              EmitInstrumentationCode(sql, routine, tc.Line, tc.CharPositionInLine);
               routine.RegisterStatement(tc);
               do
               {
@@ -1450,7 +1459,7 @@ namespace MySql.Debugger
             break;
           case "while":
             {
-              EmitInstrumentationCode(sql, routine, tc.Line);
+              EmitInstrumentationCode(sql, routine, tc.Line, tc.CharPositionInLine);
               bool hasLabel = false;
               if (Cmp(tc.GetChild(0).Text, "label") == 0)
               {
@@ -1498,7 +1507,8 @@ namespace MySql.Debugger
                   // skip label, until & until-condition
                    childColl.Take(childColl.Count - 2).Skip(1).ToList(), routine, sql);
               }
-              EmitInstrumentationCode(sql, routine, tc.GetChild(tc.ChildCount - 1).Line);
+              trTmp = tc.GetChild(tc.ChildCount - 1);
+              EmitInstrumentationCode(sql, routine, trTmp.Line, trTmp.CharPositionInLine);
               sql.Append("until ");
               // Concat until condition
               ConcatTokens(sql, tokenStream, 
@@ -1552,7 +1562,7 @@ namespace MySql.Debugger
             {
               int i = 0;
               routine.RegisterStatement(tc);
-              EmitInstrumentationCode(sql, routine, tc.Line);
+              EmitInstrumentationCode(sql, routine, tc.Line, tc.CharPositionInLine);
               sql.AppendLine("case");
               CommonTree whenCt = (CommonTree)tc.GetChild(0);
               if (Cmp(whenCt.Text, "when") != 0)
@@ -1583,7 +1593,7 @@ namespace MySql.Debugger
           case "call":
             {
               routine.RegisterStatement(tc);
-              EmitInstrumentationCode(sql, routine, tc.Line);
+              EmitInstrumentationCode(sql, routine, tc.Line, tc.CharPositionInLine);
               ConcatTokens(sql, tokenStream, tc.TokenStartIndex, tc.TokenStopIndex);
             }
             break;
@@ -1594,7 +1604,7 @@ namespace MySql.Debugger
             {
               routine.RegisterStatement(tc);
               string label = tc.GetChild(0).Text;
-              EmitInstrumentationCode(sql, routine, tc.Line);
+              EmitInstrumentationCode(sql, routine, tc.Line, tc.CharPositionInLine);
               if (routine._leaveLabel == label)
               {
                 EmitEndScopeCode(sql);
@@ -1605,7 +1615,7 @@ namespace MySql.Debugger
           case "return":
             {
               routine.RegisterStatement(tc);
-              EmitInstrumentationCode(sql, routine, tc.Line);
+              EmitInstrumentationCode(sql, routine, tc.Line, tc.CharPositionInLine);
               EmitEndScopeCode(sql);
               ConcatTokens(sql, tokenStream, tc.TokenStartIndex, tc.TokenStopIndex);
               // Workaround: sometimes last token of declare statement is not the expected semicolon, if so, add it.
@@ -1622,7 +1632,7 @@ namespace MySql.Debugger
             if (Cmp(tc.Text, "declare") != 0)
             {
               routine.RegisterStatement(tc);
-              EmitInstrumentationCode(sql, routine, tc.Line);
+              EmitInstrumentationCode(sql, routine, tc.Line, tc.CharPositionInLine);
               ConcatTokens(sql, tokenStream, tc.TokenStartIndex, tc.TokenStopIndex);
             }
             else
@@ -1647,7 +1657,10 @@ namespace MySql.Debugger
       st = new StoreType();
       st.Name = string.Format( "{0}.{1}",prefix, r.GetString(0) );
       st.Type = r.GetString(1);
-      st.Length = StoreType.IsString(st.Type) ? r.GetInt32(4) : r.GetInt32(2);
+      if (StoreType.IsString(st.Type))
+        st.Length = r.GetInt32(4);
+      else if ( StoreType.IsNumeric( st.Type ) )
+        st.Length = r.GetInt32(2);
       st.Values = null;   // TODO: For now, no supporting enum types
       st.Precision = StoreType.IsNumeric(st.Type) ? r.GetInt32(3) : 0;
       st.Unsigned = false;
@@ -1701,6 +1714,7 @@ ri.TriggerInfo.Table, ri.TriggerInfo.ObjectSchema);
         if ((tok.Type == MySQL51Parser.AT1) && ((i + 1) < cts.Count) &&
           (cts.Get(i + 1).Type == MySQL51Parser.ID))
         {
+          if ((i > 0) && (cts.Get(i - 1).Type == MySQL51Parser.ID)) continue;
           string id = string.Format( "@{0}", cts.Get( i + 1 ).Text );
           StoreType st;
           if( !vars.TryGetValue( id, out st ) )
@@ -2216,16 +2230,21 @@ ri.TriggerInfo.Table, ri.TriggerInfo.ObjectSchema);
 
     public object Eval(string expression)
     {
+      return Eval(expression, CurrentScope);
+    }
+
+    public object Eval(string expression, RoutineScope rs)
+    {
       CommonTokenStream cts;
       StringBuilder sb = new StringBuilder();
       MySQL51Parser.program_return pr = this.ParseSql(
         string.Format("select {0}", expression), false, out sb, out cts);
-      return Eval((CommonTree)((CommonTree)pr.Tree).GetChild(0), cts);
+      return Eval((CommonTree)((CommonTree)pr.Tree).GetChild(0), cts, rs);
     }
 
-    private object Eval(CommonTree t, CommonTokenStream cts)
+    private object Eval(CommonTree t, CommonTokenStream cts, RoutineScope rs)
     {
-      string expr = ReplaceVarsWithValues(t, cts);
+      string expr = ReplaceVarsWithValues(t, cts, rs);
       return ExecuteScalar(expr);
     }
 
@@ -2235,9 +2254,9 @@ ri.TriggerInfo.Table, ri.TriggerInfo.ObjectSchema);
     /// </summary>
     /// <param name="t"></param>
     /// <returns>A string with the expression after replacing the values.</returns>
-    internal string ReplaceVarsWithValues(CommonTree t, CommonTokenStream cts)
+    internal string ReplaceVarsWithValues(CommonTree t, CommonTokenStream cts, RoutineScope rs )
     {
-      Dictionary<string, StoreType> vars = CurrentScope.Variables;
+      Dictionary<string, StoreType> vars = rs.Variables;
       StringBuilder sb = new StringBuilder();
 
       //foreach (IToken tok in cts.GetTokens(t.TokenStartIndex, t.TokenStopIndex))

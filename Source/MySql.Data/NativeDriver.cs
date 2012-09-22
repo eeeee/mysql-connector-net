@@ -29,6 +29,7 @@ using MySql.Data.Types;
 using System.Security.Cryptography.X509Certificates;
 using MySql.Data.MySqlClient.Properties;
 using System.Text;
+using MySql.Data.MySqlClient.Authentication;
 #if !CF
 using System.Net.Security;
 using System.Security.Authentication;
@@ -45,6 +46,7 @@ namespace MySql.Data.MySqlClient
     private DBVersion version;
     private int threadId;
     protected String encryptionSeed;
+    internal string EncryptionSeed { get { return encryptionSeed; } }
     protected ServerStatusFlags serverStatus;
     protected MySqlStream stream;
     protected Stream baseStream;
@@ -53,6 +55,7 @@ namespace MySql.Data.MySqlClient
     private ClientFlags connectionFlags;
     private Driver owner;
     private int warnings;
+    private MySqlAuthenticationPlugin authPlugin;
 
     // Windows authentication method string, used by the protocol.
     // Also known as "client plugin name".
@@ -97,12 +100,12 @@ namespace MySql.Data.MySqlClient
       get { return packet; }
     }
 
-    private MySqlConnectionStringBuilder Settings
+    internal MySqlConnectionStringBuilder Settings
     {
       get { return owner.Settings; }
     }
 
-    private Encoding Encoding
+    internal Encoding Encoding
     {
       get { return owner.Encoding; }
     }
@@ -113,7 +116,17 @@ namespace MySql.Data.MySqlClient
         owner.Close();
     }
 
-    private void ReadOk(bool read)
+    internal void SendPacket(MySqlPacket p)
+    {
+      stream.SendPacket(p);
+    }
+
+    internal MySqlPacket ReadPacket()
+    {
+      return packet = stream.ReadPacket();
+    }
+
+    internal void ReadOk(bool read)
     {
       try
       {
@@ -248,6 +261,11 @@ namespace MySql.Data.MySqlClient
       {
         authenticationMethod = packet.ReadString();
       }
+      else
+      {
+        // Some MySql versions like 5.1, don't give name of plugin, default to native password.
+        authenticationMethod = "mysql_native_password";
+      }
 
       // based on our settings, set our connection flags
       SetConnectionFlags(serverCaps);
@@ -280,7 +298,7 @@ namespace MySql.Data.MySqlClient
       packet.WriteByte(8);
       packet.Write(new byte[23]);
 
-      Authenticate(false);
+      Authenticate(authenticationMethod, false);
 
       // if we are using compression, then we use our CompressedStream class
       // to hide the ugliness of managing the compression
@@ -458,134 +476,19 @@ namespace MySql.Data.MySqlClient
       connectionFlags = flags;
     }
 
-
-    private void AuthenticateSSPI()
+    public void Authenticate(string authMethod, bool reset)
     {
-
-      string targetName = ""; // target name (required by Kerberos)
-
-      // First packet sent by server should include target name (for
-      // Kerberos) as UTF8 string. It might however be prepended by junk 
-      // at the start of the string (0xfe"authentication_win_client"\0,
-      // see Bug#57442), this junk will be ignored. Target name can also 
-      // be an empty string if server is not running in a domain environment, 
-      // in this case authentication will fallback to NTLM.
-
-      // Note that 0xfe byte at the start could also indicate that windows
-      // authentication is not supported by sérver, we throw an exception
-      // if this happens.
-
-      packet = stream.ReadPacket();
-      byte b = packet.ReadByte();
-      if (b == 0xfe)
+      if (authMethod != null)
       {
-        string authMethod = packet.ReadString();
-        if (authMethod.Equals(AuthenticationWindowsPlugin))
-        {
-          targetName = packet.ReadString(Encoding.UTF8);
-        }
-        else
-        {
-          // User has requested Windows authentication,  bail out.
-          throw new MySqlException("unexpected authentication method " +
-              authMethod);
-        }
+        byte[] seedBytes = Encoding.GetBytes(encryptionSeed);
+
+        // Integrated security is a shortcut for windows auth
+        if (Settings.IntegratedSecurity)
+          authMethod = "authentication_windows_client";
+
+        authPlugin = MySqlAuthenticationPlugin.GetPlugin(authMethod, this, seedBytes);
       }
-      else
-      {
-        targetName = Encoding.UTF8.GetString(packet.Buffer, 0, packet.Buffer.Length);
-      }
-
-      // Do SSPI authentication handshake
-      SSPI sspi = new SSPI(targetName, stream.BaseStream, stream.SequenceByte, version);
-      sspi.AuthenticateClient();
-
-      // read ok packet.
-      packet = stream.ReadPacket();
-      ReadOk(false);
-    }
-
-    /// <summary>
-    /// Perform an authentication against a 4.1.1 server
-    /// <param name="reset">
-    /// True, if this function is called as part of CHANGE_USER request
-    /// (connection reset)
-    /// False, for first-time logon
-    /// </param>
-    /// </summary>
-    private void AuthenticateNew(bool reset)
-    {
-      if ((connectionFlags & ClientFlags.SECURE_CONNECTION) == 0)
-        AuthenticateOld();
-
-      packet.Write(Crypt.Get411Password(Settings.Password, encryptionSeed));
-      if ((connectionFlags & ClientFlags.CONNECT_WITH_DB) != 0 && Settings.Database != null)
-        packet.WriteString(Settings.Database);
-      else
-        packet.WriteString(""); // Add a null termination to the string.
-
-
-      if (Settings.IntegratedSecurity)
-      {
-        // Append authentication method after the database name in the 
-        // handshake authentication packet.If we're sending CHANGE_USER
-        // also write charset number after database name prior to plugin name
-        if (reset)
-        {
-          packet.WriteInteger(8, 2); // Charset number
-        }
-        packet.WriteString(AuthenticationWindowsPlugin);
-        stream.SendPacket(packet);
-        AuthenticateSSPI();
-        return;
-      }
-      else
-      {
-        stream.SendPacket(packet);
-      }
-
-      // this result means the server wants us to send the password using
-      // old encryption
-      packet = stream.ReadPacket();
-      if (packet.IsLastPacket)
-      {
-        packet.Clear();
-        packet.WriteString(Crypt.EncryptPassword(
-                               Settings.Password, encryptionSeed.Substring(0, 8), true));
-        stream.SendPacket(packet);
-        ReadOk(true);
-      }
-      else
-        ReadOk(false);
-    }
-
-    private void AuthenticateOld()
-    {
-      packet.WriteString(Crypt.EncryptPassword(
-                             Settings.Password, encryptionSeed, true));
-      if ((connectionFlags & ClientFlags.CONNECT_WITH_DB) != 0 && Settings.Database != null)
-        packet.WriteString(Settings.Database);
-
-      stream.SendPacket(packet);
-      ReadOk(true);
-    }
-
-
-    public void Authenticate(bool reset)
-    {
-      if (Settings.IntegratedSecurity)
-      {
-        if (String.IsNullOrEmpty(Settings.UserID))
-          packet.WriteString(AuthenticationWindowsUser);
-        else
-          packet.WriteString(Settings.UserID);
-      }
-      else
-      {
-        // write the user id to the auth packet
-        packet.WriteString(Settings.UserID);
-      }
-      AuthenticateNew(reset);
+      authPlugin.Authenticate(reset);
     }
 
     #endregion
@@ -597,7 +500,7 @@ namespace MySql.Data.MySqlClient
       stream.SequenceByte = 0;
       packet.Clear();
       packet.WriteByte((byte)DBCmd.CHANGE_USER);
-      Authenticate(true);
+      Authenticate(null, true);
     }
 
     /// <summary>

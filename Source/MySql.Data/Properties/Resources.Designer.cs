@@ -88,6 +88,24 @@ namespace MySql.Data.MySqlClient.Properties {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Authentication to host &apos;{0}&apos; for user &apos;{1}&apos; using method &apos;{2}&apos; failed with message: {3}.
+        /// </summary>
+        public static string AuthenticationFailed {
+            get {
+                return ResourceManager.GetString("AuthenticationFailed", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Authentication method &apos;{0}&apos; not supported by any of the available plugins..
+        /// </summary>
+        public static string AuthenticationMethodNotSupported {
+            get {
+                return ResourceManager.GetString("AuthenticationMethodNotSupported", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Version string not in acceptable format.
         /// </summary>
         public static string BadVersionFormat {
@@ -1116,6 +1134,15 @@ namespace MySql.Data.MySqlClient.Properties {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Unable to create plugin for authentication method &apos;{0}&apos;. Please see inner exception for details..
+        /// </summary>
+        public static string UnableToCreateAuthPlugin {
+            get {
+                return ResourceManager.GetString("UnableToCreateAuthPlugin", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Unable to derive stored routine parameters.  The &apos;Parameters&apos; information schema table is not available and access to the stored procedure body has been disabled..
         /// </summary>
         public static string UnableToDeriveParameters {
@@ -1188,11 +1215,29 @@ namespace MySql.Data.MySqlClient.Properties {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Unknown authentication method &apos;{0}&apos; was requested..
+        /// </summary>
+        public static string UnknownAuthenticationMethod {
+            get {
+                return ResourceManager.GetString("UnknownAuthenticationMethod", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to The requested column value could not be treated as or conveted to a Guid..
         /// </summary>
         public static string ValueNotSupportedForGuid {
             get {
                 return ResourceManager.GetString("ValueNotSupportedForGuid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Windows authentication connections are not supported on {0}.
+        /// </summary>
+        public static string WinAuthNotSupportOnPlatform {
+            get {
+                return ResourceManager.GetString("WinAuthNotSupportOnPlatform", resourceCulture);
             }
         }
         
