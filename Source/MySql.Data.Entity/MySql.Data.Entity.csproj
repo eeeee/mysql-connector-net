@@ -56,7 +56,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="EntityFramework">
-      <HintPath>..\..\..\entityframework-5fbc51fdc1c8\src\EntityFramework\bin\Debug\EntityFramework.dll</HintPath>
+      <HintPath>..\..\..\entityframework\src\EntityFramework\bin\Debug\EntityFramework.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />

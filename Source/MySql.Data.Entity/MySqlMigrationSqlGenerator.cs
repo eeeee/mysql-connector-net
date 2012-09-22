@@ -372,16 +372,22 @@ namespace MySql.Data.Entity
         switch (char.ToLower(opCommand.CommandText[0]))
         {
             case 'i':
-                var opModel = (byte[])opCommand.Parameters.ElementAt(1).Value;
-                var opProductVersion = (string)opCommand.Parameters.ElementAt(2).Value;
+                var contextKey = (string)opCommand.Parameters.ElementAt(1).Value;
+                var opModel = (byte[])opCommand.Parameters.ElementAt(2).Value;
+                var opProductVersion = (string)opCommand.Parameters.ElementAt(3).Value;
                 foreach (byte item in opModel)
                     model.Append(item.ToString("X2"));
 
+                /*sb.Append("insert into `" + opTable + "` (`migrationId`, `contextKey`, `model`, `productVersion`) ");
+                sb.AppendFormat(" values ( '{0}', '{3}', {1}, '{2}') ",
+                                opMigrationId,
+                                "0x" + model.ToString(),
+                                opProductVersion, contextKey);*/
                 sb.Append("insert into `" + opTable + "` (`migrationId`, `model`, `productVersion`) ");
                 sb.AppendFormat(" values ( '{0}', {1}, '{2}') ",
                                 opMigrationId,
                                 "0x" + model.ToString(),
-                                opProductVersion);
+                                opProductVersion, contextKey);
                 break;
             case 'd':
                 return new MigrationStatement { Sql = string.Format("delete from `{0}` where MigrationId = '{1}'", opTable, opMigrationId) };

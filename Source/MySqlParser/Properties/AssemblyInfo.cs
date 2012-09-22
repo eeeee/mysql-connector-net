@@ -60,4 +60,4 @@ using System.Security;
 [assembly: AssemblyFileVersion("1.0.0.0")]
 
 
-[assembly: AssemblyKeyName("ConnectorNet")]
+//[assembly: AssemblyKeyName("ConnectorNet")]
